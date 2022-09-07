@@ -1,0 +1,423 @@
+
+### USO DE ALGORITMOS K-MEANS Y DBSCAN
+
+
+## Limpieza, análisis exploratorio y uso de k-means
+
+Se hará uso del juego de datos *Hawks* presente en el paquete R *Stat2Data*.  
+https://cran.r-project.org/web/packages/Stat2Data/Stat2Data.pdf
+
+```{r message= FALSE, warning=FALSE}
+if (!require('Stat2Data')) install.packages('Stat2Data')
+library(Stat2Data)
+data("Hawks")
+```
+
+```{r message= FALSE, warning=FALSE}
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(FactoMineR)
+library(corrplot)
+
+summary(Hawks)
+```
+
+Los datos presentan las siguientes columnas:
+*   Month: Fecha del avistamiento del ave, estas fechas datan de entre Septiembre y Diciembre
+*   Day: Día del avistamiento
+*   Year: Año del avistamiento, datan de entre 1992 y 2003
+*   CaptureTime: Hora exacta en que se capturó al ave
+*   ReleaseTime: hora exacta de liberación del ave
+*   BandNumber: Identificador del ave
+*   Species: Especie a la que pertenece, tenemos 3: CH=Cooper’s, RT=Red-tailed, SS=Sharp-Shinned
+*   Age: Edad, puede tomar los valores Adulto o Inmaduro
+*   Sex: Sexo Femenino o Masculino
+*   Wing: Largo en mm de la pluma del ala primaria
+*   Weight: Peso en gramos
+*   Culmen: Longitud en mm del pico
+*   Hallux: Longitud en mm de la garra posterior/asesina
+*   Tail: Medida en mm del largo de la cola
+*   StandardTail: Medida estándar de la cola
+*   Tarsus: Longitud del hueso básico de la garra
+*   WingPitFat: Cantidad de grasa en el hoyo del ala
+*   KeelFat: cantidad de grasa en el hueso del esternón
+*   Crop: Cantidad de material en el cultivo
+
+
+De los 4 atributos que vamos a trabajar vemos que los datos de Wing se distribuyen entre 37.2 y 480, Weight entre 56.0 y 335.0, Culmen entre 8.6 y 39.2, Hallux entre 9.5 y 341.4. Revisando sus medias y cuadrantes podemos considerar que los datos son correctos, además la cantidad de datos vacíos que hay es mínima y procedemos a ignorarlos. 
+
+```{r message= FALSE, warning=FALSE}
+x <- na.omit(Hawks[,10:13])
+summary(x)
+```
+
+Vamos a ver de los 4 atributos que hemos elegido cuales de ellos tienen mas correlación, creamos una matriz de correlación la cual nos muestra que Hallux y Wing serían los más cercanos, debemos tener en cuenta que las 4 columnas están en diferentes escalas como hemos visto en el summary, por tanto tendremos que escalar los datos para poder llegar a conclusiones acertadas
+
+```{r message= FALSE, warning=FALSE}
+corrplot(cor(x), type = "upper", method = "ellipse", tl.cex = 0.9)
+```
+
+Escalamos mediante la función scale y haremos uso de una reducción de dimensionalidad mediante el método PCA
+```
+```{r message= FALSE, warning=FALSE}
+x_scaled <- scale(x)
+res.pca <- PCA(x_scaled,  graph = FALSE)
+```
+
+Vemos como se dividen las varianzas, y observamos que el compontente 1 (PC1) captura el 79% de la varianza mientras que el PC2 captura el 18.7%
+
+```{r message= FALSE, warning=FALSE}
+fviz_screeplot(res.pca, addlabels = TRUE, ylim = c(0, 100))
+
+var <- get_pca_var(res.pca)
+```
+
+Vemos como se dividen las contribuciones de las variables al PC1 y observamos que wing, culmen y weight tienden a incrementar a la vez
+
+```{r message= FALSE, warning=FALSE}
+fviz_contrib(res.pca, choice = "var", axes = 1, top = 10)
+```
+
+Analizamos ahora las contribuciones de la variable Hallux, y en contraposición con la primera conclusión a la que habíamos llegado observamos que esta no tiene practicamente correlación con otros atributos
+
+```{r message= FALSE, warning=FALSE}
+fviz_contrib(res.pca, choice = "var", axes = 2, top = 10)
+```
+
+Mostramos de forma visual los resultados comentados:
+
+```{r message= FALSE, warning=FALSE}
+fviz_pca_var(res.pca, col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE # Avoid text overlapping
+             ) + theme_minimal() + ggtitle("Variables - PCA")
+```
+
+Una vez realizado este estudio podemos preveer que las clasificaciones reales de los pares de atributos Wing, Weight y Culmen serán similares. Crearemos varios plots para ver como se distribuyen los valores reales en las 3 combinaciones de atributos posibles, ya que nos facilitará el análisis durante la elección de los clústers.
+```
+```{r message= FALSE, warning=FALSE}
+plot(x[c(1,2)], col=as.factor(Hawks$Species), main="Clasificación real Wing - Weight ", xlab=c(0,2000))
+plot(x[c(1,3)], col=as.factor(Hawks$Species), main="Clasificación real Wing - Culmen", xlab=c(0,2000))
+plot(x[c(2,3)], col=as.factor(Hawks$Species), main="Clasificación real Weight - Culmen", xlab=c(0,2000))
+```
+
+Vemos que a pesar de ello los datos parecen estar entremezclados, por lo que el clustering será complicado, de nuevo realizaremos comprobaciones visuales. Extraremos los datos de los 3 tipos de águilas existentes, y crearemos de nuevo los plots reales para ver como se distribuye cada especie
+
+
+```{r message= FALSE, warning=FALSE}
+hawk1 <- subset(Hawks, Hawks$Species=='CH')
+hawk1 <- na.omit(hawk1[,10:13])
+
+hawk2 <- subset(Hawks, Hawks$Species=='RT')
+hawk2 <- na.omit(hawk2[,10:13])
+
+hawk3 <- subset(Hawks, Hawks$Species=='SS')
+hawk3 <- na.omit(hawk3[,10:13])
+```
+
+Nos basaremos en los atributos Wing y Culmen que hemos visto son los mejores.
+
+```{r message= FALSE, warning=FALSE}
+plot(hawk1[c(1,3)], col=as.factor(Hawks$Species), main="Clasificación real CH", xlim=c(100,500), ylim=c(0,40))
+
+plot(hawk2[c(1,3)], col=as.factor(Hawks$Species), main="Clasificación real RT",xlim=c(100,500), ylim=c(0,40))
+
+plot(hawk3[c(1,3)], col=as.factor(Hawks$Species), main="Clasificación real SS",xlim=c(100,500), ylim=c(0,40))
+```
+Esto confirma nuestras sospechas, tenemos una especie, CH, la cual tiene pocos datos en comparación con el resto y no está concentrada en un punto claro, por lo que supondrá un problema.
+
+Procedemos a la búsqueda de clústers.
+
+Para empezar haremos uso del método más conocido, "the elbow method", mediante el cual observamos la suma de los cuadrados de las distancias de cada grupo con respecto a su centro y se busca el "codo" de la curva. Este método es inexacto pero nos servirá para ir haciendonos una idea. Para que los resultados sean claros pondremos un k.max=24 de forma que la gráfica es mucho mas obvia.
+
+La función fviz_nbclust nos da la posibilidad de realizar este método de una forma elegante y sencilla. 
+
+```{r message= FALSE, warning=FALSE}
+fviz_nbclust(x, kmeans, method = "wss", k.max = 10) + theme_minimal() + ggtitle("the Elbow Method")
+```
+Como vemos k=2 es el número óptimo.
+
+Seguimos la búsqueda de k más óptima. Ahora haremos uso del metodo de la silueta, silhouette method. Este calcula la silueta promedio de las observaciones para diferentes valores de k. El número óptimo de clusters será el que maximice la silueta promedio en un rango de valores posibles para k.
+
+```{r message= FALSE, warning=FALSE}
+fviz_nbclust(x, kmeans, method = "silhouette", k.max = 10) + theme_minimal() + ggtitle("The Silhouette Plot")
+```
+En este caso también obtenemos k=2
+
+Por último usaremos el paquete fpc. Este ejecutará el algoritmo kmeans con un conjunto de valores y selecciona los clusters en base a dos criterios, silueta media que ya hemos calculado pero ejecutaremos de nuevo a modo de comparación, y Calinski-Harabasz.
+
+```{r message= FALSE, warning=FALSE}
+if (!require('fpc')) install.packages('fpc')
+library(fpc)
+fit_ch <- kmeansruns(x, krange = 1:10, criterion = "ch") 
+fit_asw <- kmeansruns(x, krange = 1:10, criterion = "asw") 
+
+fit_ch$bestk
+fit_asw$bestk
+
+plot(1:10,fit_ch$crit,type="o",col="blue",pch=0,xlab="Número de clústers",ylab="Criterio Calinski-Harabasz")
+
+plot(1:10,fit_asw$crit,type="o",col="blue",pch=0,xlab="Número de clústers",ylab="Criterio silueta media")
+```
+
+En base a los resultados obtenidos podemos decir que 2 clústers parece la cantidad óptima para k. Este resultado no nos sorprende pues como habíamos visto en el análisis inicial, los valores pertenecientes a la especie CH serán dificilmente clasificables, y posiblemente se distribuyan entre los otros dos. Hacemos uso del algorimo kmeans y mostramos el plot resultante.
+
+```{r message= FALSE, warning=FALSE}
+hawks2clusters <- kmeans(x, 2)
+plot(x[c(1,3)], col=hawks2clusters$cluster, main="Clasificación k-means k=2")
+```
+
+A modo de curiosidad probaremos a crear este plot aumentando la k, pero el resultado es obvio,
+
+```{r message= FALSE, warning=FALSE}
+hawks3clusters <- kmeans(x, 3)
+plot(x[c(1,3)], col=hawks3clusters$cluster, main="Clasificación k-means k=3")
+
+hawks4clusters <- kmeans(x, 4)
+plot(x[c(1,3)], col=hawks4clusters$cluster, main="Clasificación k-means k=4")
+
+hawks5clusters <- kmeans(x, 5) 
+plot(x[c(1,3)], col=hawks5clusters$cluster, main="Clasificación k-means k=5")
+```
+
+Mostramos de nuevo la distribución real para ver los errores.
+
+```{r message= FALSE, warning=FALSE}
+plot(x[c(1,3)], col=as.factor(Hawks$Species), main="Clasificación real Wing - Culmen", xlab=c(0,2000))
+```
+Vemos que para k=3 y k=4 lo que hace kmeans es que divide en subgrupos la especie de águila Colirrojo (RT), lo cual es incorrecto. Para k=5 divide correctamente la especie problemática, CH, pero subdivide en 3 grupos distintos al colirrojo. Así pues la solución más eficiente por ahora parece k=2.
+
+Para calificar la calidad del agrupamiento primeramente mostramos de forma visual la agrupación de los 2 clústers elegidos
+
+```{r message= FALSE, warning=FALSE}
+fit2 <- kmeans(x, 2)
+clusplot(x, hawks2clusters$cluster, color=TRUE, shade=TRUE, labels=2, lines=0)
+
+finalkmeans <- x
+finalkmeans1 <- fit2
+
+```
+
+Y ahora procedemos a evaluar de forma numérica el proceso de agregación. En la variable y_cluster guardaremos el identificador del cluster al que hemos asignado cada muestra. Mediante la función silhouette obtendremos el cluster asignado, el cluster vecino y el valor de la silueta. La estimación dice que la calidad del agrupamiento para k=2 ha sido muy buena.
+
+```{r message= FALSE, warning=FALSE}
+d <- daisy(x) 
+
+y_cluster2 <- hawks2clusters$cluster
+sk2 <- silhouette(y_cluster2, d)
+mean(sk2[,3])
+```
+
+A modo de curiosidad analizamos los agrupamientos para las k que hemos observado previamente, y vemos que la calidad baja, por lo que podemos concluir que la elección de clústers ha sido correcta.
+
+```{r message= FALSE, warning=FALSE}
+y_cluster3 <- hawks3clusters$cluster
+y_cluster4 <- hawks4clusters$cluster
+y_cluster5 <- hawks5clusters$cluster
+
+sk3 <- silhouette(y_cluster3, d)
+sk4 <- silhouette(y_cluster4, d)
+sk5 <- silhouette(y_cluster5, d)
+
+mean(sk3[,3])
+mean(sk4[,3])
+mean(sk5[,3])
+```
+
+Teniendo en cuenta la disposición de los datos es lógico haber obtenido k=2, ya hemos explicado previamente la problemática al aumentar la k y es que el tercer grupo no estaba demasiado concentrado por lo que su clasificación era compleja y el aumento en la k para solventar este evento hacía que la efectividad de clasificación del resto de grupos bajara.
+
+
+
+### Uso de DBSCAN
+```{r message= FALSE, warning=FALSE}
+if (!require('dbscan')) install.packages('dbscan')
+library(dbscan)
+```
+
+
+El algoritmo OPTICS comienza seleccionando un caso aleatorio en los datos y buscando otros en un radio de búsqueda. Este radio será el parámetro epsilon. El parámetro minPts por otro lado indicará el mínimo número de casos necesarios que debe tener un punto para que sea considerado clúster, por defecto será 5.
+
+En nuestro caso no especificaremos un valor para eps, por lo que por defecto se asigna la distancia mas larga desde un minPts, lo que viene a significar lo mismo que darle valor infinito, porque tendrá un radio capaz de llegar hasta el punto más lejano.
+
+eps_cl será el umbral para identificar clústers se debe cumplir que: eps_cl<=eps
+
+Mostramos el plot de los casos a analizar
+
+```{r message= FALSE, warning=FALSE}
+plot(x[c(1,3)], col=as.factor(Hawks$Species))
+
+x <- x[c(1,3)]
+```
+
+Lo primero que haremos será ordenar las observaciones
+
+```{r message= FALSE, warning=FALSE}
+res <- optics(x, minPts = 5)
+res
+```
+
+El resultado de aplicar optics() nos ha dado un valor eps=118.303212128834, este dato deberá ser tenido en cuenta a la hora de elegir el valor de eps_cl, puesto que si la diferencia entre ellos es muy grande se nos mostrará mucho ruido lo que implica que la mayor parte de los puntos no serán asignados a un clúster.
+
+Mostramos las observaciones ordenadas
+
+```{r message= FALSE, warning=FALSE}
+res$order
+```
+
+Creamos la gráfica de alcanzabilidad en la cual los valles serán clústers y las cimas los puntos entre agrupaciones, podemos ver que debido a la cantidad de datos y las distancias entre ellos nuestro plot no es demasiado útil, aunque podríamos interpretar que se trata de 2 clústers.
+
+```{r message= FALSE, warning=FALSE}
+plot(res, ylim = c(0, 40))
+```
+
+Mediante polygon podremos hacer una mejor representación, vemos que las trazas entre puntos cercanos forman prácticamente 2 clústers, 
+
+```{r message= FALSE, warning=FALSE}
+plot(x, col = "grey")
+polygon(x[res$order,])
+```
+
+Visto el valor asignado a eps, la alcanzabilidad en el valor eps_cl deberá ser suficiente para poder formar clústers, como demostraremos a continuación una alcanzabilidad demasiado baja solo producirá ruido.
+
+```{r message= FALSE, warning=FALSE}
+res <- extractDBSCAN(res, eps_cl = 0.065)
+res
+plot(res)
+```
+
+No hay una forma exacta de calcular nuestro eps_cl por lo que en función del ruido que queramos obtener y la disposición de nuestros datos tendremos que ir variandolo, ejemplificaremos a continuación como se reducen los puntos inalcanzables a medida que aumentamos su valor.
+
+```{r message= FALSE, warning=FALSE}
+res <- extractDBSCAN(res, eps_cl = 1.1)
+res
+res <- extractDBSCAN(res, eps_cl = 1.2)
+res
+res <- extractDBSCAN(res, eps_cl = 1.9)
+res
+res <- extractDBSCAN(res, eps_cl = 5)
+res
+```
+
+En el proximo plot podemos ver que para eps_cl=5 la mayor parte de los puntos han sido asignados a algun clúster, los que quedan fuera son los que están a una distancia mayor.
+
+```{r message= FALSE, warning=FALSE}
+plot(res)
+```
+
+Como hemos visto en el plot anterior, la primera cima formada por puntos de ruido está a una distancia máxima de 40. 
+
+No podemos darle un valor muy grande a eps_cl porque esto implicará que reduciremos a 0 los puntos de ruido pero la distancia permitirá alcanzar los puntos que deberían haber sido asignados a otros clústers distintos como veremos  a continuación. 
+
+```{r message= FALSE, warning=FALSE}
+res <- extractDBSCAN(res, eps_cl = 100)
+res
+plot(res)
+hullplot(x, res)
+```
+
+Probaremos a asignar valor 20 a eps_cl para intentar alcanzar todos los puntos manteniendo una distribución lógica de clústers. 
+
+```{r message= FALSE, warning=FALSE}
+res <- extractDBSCAN(res, eps_cl = 20)
+res
+plot(res)
+hullplot(x, res)
+
+finaldbscan <- x
+finaldbscan1 <- res
+
+new1_cluster <- res$cluster
+```
+
+Haciendo un análisis más profundo podemos observar que existe la posibilidad de crear 3 clústers ya que hay una pequeña cima a una altura de 5 justo en x=600 que divide en dos los datos de la derecha (en el plot), conociendo la distribución real de los casos podemos asegurar que esta es la mejor solución a la podremos llegar, si hacemos que eps_cl supere esa cima unificaremos los actuales clústers verde y azul. 
+
+```{r message= FALSE, warning=FALSE}
+res <- extractDBSCAN(res, eps_cl = 6)
+res
+plot(res)
+hullplot(x, res)
+```
+
+Para poder concluir de forma numérica cuan bueno es el agrupamiento veremos que nos beneficia mas, si tener 2 clústers con poco ruido o tener 3 con los datos mejor asignados pero mayor cantidad de ruido.
+
+Mostramos la asignación de clústers para el caso en el que hemos seleccionado 2, el plot de agrupaciones y la media para obtener una estimación de la calidad del agrupamiento
+
+```{r message= FALSE, warning=FALSE}
+new1_cluster
+d <- daisy(x) 
+clusplot(x, new1_cluster, color=TRUE, shade=TRUE, labels=2, lines=0)
+new1 <- silhouette(new1_cluster, d)
+mean(new1[,3])
+```
+
+Mostrmos ahora el caso en el que hemos seleccionado 3 clústers
+
+```{r message= FALSE, warning=FALSE}
+new2_cluster <- res$cluster
+new2_cluster
+d <- daisy(x) 
+clusplot(x, new2_cluster, color=TRUE, shade=TRUE, labels=2, lines=0)
+new2 <- silhouette(new2_cluster, d)
+mean(new2[,3])
+```
+
+Como conclusión podemos decir que sale más rentable el primer caso en el cual hemos asignado eps_cl = 20 y hemos obtenido unicamente 2 clústers y 4 puntos de ruido. De esta forma conseguimos una calidad de 0.8437535 frente a los 0.7201674 del caso de los 3 clústers y 21 puntos de ruido.
+
+Probaremos ahora el metodo extractXi, el cual se basa en el parámetro xi (entre 0 y 1) para clasificar los clústers en función de su densidad relativa
+
+El parámetro 0.05 es demasiado bajo como podemos ver, lo subiremos bastante para ver los cambios
+
+```{r message= FALSE, warning=FALSE}
+res <- extractXi(res, xi = 0.05)
+res
+plot(res)
+hullplot(x, res)
+```
+
+En los siguientes casos podemos ver como varían los clústers según aumentamos Xi
+
+```{r message= FALSE, warning=FALSE}
+res <- extractXi(res, xi = 0.3)
+res
+plot(res)
+hullplot(x, res)
+
+res <- extractXi(res, xi = 0.55)
+res
+plot(res)
+hullplot(x, res)
+
+res <- extractXi(res, xi = 0.5)
+res
+plot(res)
+hullplot(x, res)
+```
+
+Ni si quiera procederemos a mostrar la efectividad de este método por que se ve que la asignación de clústers no concuerda en prácticamente nada con los datos reales, incluso cuando asigna solo 4 clústers los ha intercambiado con respecto a los reales, por tanto es incorrecto.
+
+
+###    Comparación de resultados
+*   DBSCAN con 2 clústers y 4 puntos de ruido: 0.8437535 
+*   DBSCAN con 3 clústers y 21 puntos de ruido: 0.7201674
+*   k-means con 2 clústers: 0.8063269 
+*   k-means con 3 clústers: 0.6642863
+
+Podemos ver que la efectividad en cuanto a la asignación ha sido mayor en el caso del dbscan.
+
+##    PROS Y CONTRAS:
+*   El número de clústers de k-means debe ser especificado a priori, mientras que DBSCAN no lo necesita.
+*   k-means no maneja bien los datasets con mucho ruido y "outliers", mientras que DBSCAN es extremadamente eficiente en este ámbito.
+*   Por la forma de elección de clústers k-means manejará puntos anómalos y los asignará al clúster más cercano, en cambio DBSCAN localiza regiones con gran densidad dado un radio lo que excluye este tipo de puntos y no los asigna a un clúster, además se puede definir el mínimo número de puntos necesarios para que lo considere clúster, por lo que no creará clústers de puntos anómalos.
+*   Datasets extensos no afectan al funcionamiento de k-means en cambio si esto implica mucha variación de densidades DBSCAN se verá afectado negativamente
+*   k-means intenta crear clústers del mismo tamaño mientras que DBSCAN crea clústers independientemente del tamaño del resto.
+
+## CONCLUSIÓN.
+En base a los pros y contras planteados podemos dar explicación a los resultados obtenidos:
+
+*   Los dos algoritmos han conseguido unos resultados buenos y similares pero ninguno de ellos ha realizado una asignación cercana a la perfección.
+*   En el caso de kmeans como hemos comentado este intenta crear clústers del mismo tamaño, el hecho de que nostoros tuvieramos una especie (CH) con muchas menos muestras que el resto hacía que kmeans asignara casos de otras especies a esta para equilibrar los grupos.
+*   En el caso de DBSCAN la misma especie en cuestión (CH) tenía características similares a otra (SS), como dbscan trabaja con densidades para hacer la distinción necesita una zona de densidad baja entre medias, esta zona no existía pues los datos de ambas especies estaban muy juntos
+*   kmeans ha asignado todos los puntos anómalos a algun clúster, tanto si se trata de errores como si se trata de casos extraordinarios, todos han sido asignados a algun clúster. En el caso de DBSCAN ninguno de los dos será asignado a un clúster a menos que aumentemos el radio de densidad, lo cual hará que incluya ambos tipos de puntos y catalogue erróneamente otros datos.
+
+Podemos concluir pues que debido a la naturaleza de nuestros datos ambos algortimos han tenido eficiencias similares, destacamos la victoria de k-means posiblemente debida a que el manejo de ruido de DBSCAN en este caso ha jugado en su contra pues ha dejado fuera algunos datos, ya que si nos fijamos los clústers de ambos son muy similares.
